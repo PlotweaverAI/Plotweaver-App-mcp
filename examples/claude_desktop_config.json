@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "storm-tts": {
+      "command": "node",
+      "args": [
+        "/Users/mac/Desktop/PlotWeaver/storm-tts-mcp/dist/index.js"
+      ],
+      "env": {
+        "STORM_API_KEY": "your_storm_api_key_here",
+        "STORM_BASE_URL": "http://18.208.227.247:8000"
+      }
+    }
+  }
+}

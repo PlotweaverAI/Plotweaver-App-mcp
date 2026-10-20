@@ -1,0 +1,67 @@
+{
+  "name": "@plotweaver/mcp-storm-tts",
+  "version": "1.0.0",
+  "description": "Model Context Protocol (MCP) server & Developer SDK for PlotWeaver STORM TTS Nigerian Multilingual Voice Synthesis & Streaming",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "bin": {
+    "storm-tts-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch",
+    "test": "npm run build && node test/test-suite.mjs"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PlotweaverAI/storm-tts-mcp.git"
+  },
+  "homepage": "https://plotweaver.app",
+  "bugs": {
+    "url": "https://github.com/PlotweaverAI/storm-tts-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "tts",
+    "text-to-speech",
+    "nigerian-languages",
+    "yoruba",
+    "hausa",
+    "igbo",
+    "pidgin",
+    "voice-cloning",
+    "plotweaver",
+    "storm-os"
+  ],
+  "author": "PlotWeaver AI",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "dotenv": "^16.4.7",
+    "ws": "^8.22.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.10",
+    "@types/ws": "^8.18.2",
+    "typescript": "^5.7.2"
+  }
+}
