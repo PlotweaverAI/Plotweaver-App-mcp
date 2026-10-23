@@ -121,20 +121,20 @@ export interface StormCapabilities {
 
 export interface ClientConfig {
   /**
-   * STORM API key.
-   * If omitted, checks STORM_TTS_API_KEY (for v5) or STORM_API_KEY (for v2).
+   * STORM API key. Sent only to this client's baseUrl.
+   * If omitted, uses STORM_TTS_API_KEY for 'v5-streaming' or STORM_API_KEY otherwise.
    */
   apiKey?: string;
   /**
-   * Base URL of the inference instance.
-   * Defaults to http://18.208.227.247:8000 (v2) or http://54.198.152.226:8000 (v5).
+   * Base URL of the inference instance. Every request from this client goes here, and nowhere else.
+   * Defaults to STORM_TTS_BASE_URL (v5) or STORM_BASE_URL (v2/auto), then the built-in host for the engine.
    */
   baseUrl?: string;
   /**
    * Select engine target:
    * - 'v2-cloning': Target STORM-OS-TTS-V2 (with voice cloning)
    * - 'v5-streaming': Target STORM TTS v5 (vLLM with HTTP/WS streaming)
-   * - 'auto': Auto-detect based on baseUrl or health endpoint (default)
+   * - 'auto': Ask the server's /health endpoint which engine it is (default)
    */
   engine?: StormModelEngine;
   /**

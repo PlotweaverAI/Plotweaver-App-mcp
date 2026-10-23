@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.github
+test
+examples
+docs
+storm-audio
+gateway-data
+.env
+.env.*
+*.wav
+*.mp3
+gateway-keys.json

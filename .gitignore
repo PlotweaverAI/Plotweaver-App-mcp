@@ -4,3 +4,9 @@ dist/
 *.mp3
 .env
 .DS_Store
+
+# Gateway state: user keys (hashed) and usage. Never commit.
+gateway-keys.json
+usage.json
+gateway-data/
+storm-audio/
