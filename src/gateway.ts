@@ -1,11 +1,16 @@
 import * as http from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, webcrypto } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { createStormMcpServer, type StormClients } from './server.js';
 import { VoiceCatalog } from './catalog.js';
 import { KeyStore, type PublicKey } from './keys.js';
 import { Concurrency, DailyQuota, LimitError, RateLimiter } from './limits.js';
+
+// The MCP SDK reads the global `crypto` object. Node 18 does not provide it, so supply it.
+if (!globalThis.crypto) {
+  (globalThis as any).crypto = webcrypto;
+}
 
 export interface GatewayConfig {
   port: number;
