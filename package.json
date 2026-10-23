@@ -1,6 +1,6 @@
 {
   "name": "@plotweaver/mcp-storm-tts",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Model Context Protocol (MCP) server & Developer SDK for PlotWeaver STORM TTS Nigerian Multilingual Voice Synthesis & Streaming",
   "type": "module",
   "main": "./dist/index.js",
@@ -24,7 +24,8 @@
     "prepublishOnly": "npm run build",
     "start": "node dist/index.js",
     "dev": "tsc --watch",
-    "test": "npm run build && node test/test-suite.mjs"
+    "test": "npm run build && node --test test/unit.test.mjs",
+    "test:live": "npm run build && node test/test-suite.mjs && node test/live-mcp.mjs && node test/live-gateway.mjs"
   },
   "engines": {
     "node": ">=18.0.0"

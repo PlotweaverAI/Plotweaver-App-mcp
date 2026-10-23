@@ -10,7 +10,6 @@ import {
   type StormCapabilities,
   type StormHealthResponse,
   type StormLanguageCode,
-  type StormModelEngine,
   type StormVoicesResponse,
   type StreamSpeechOptions,
   type WebSocketDoneEvent,
@@ -20,6 +19,13 @@ import {
 } from './types.js';
 
 export { normalizeSpeechText };
+
+const CLONING_ON_V5_ERROR =
+  'StormTTS: voice cloning is only available on STORM-OS-TTS-V2. Create the client with engine: "v2-cloning" and a V2 baseUrl.';
+const STREAMING_ON_V2_ERROR =
+  'StormTTS: HTTP and WebSocket streaming require STORM TTS v5. Create the client with engine: "v5-streaming" and a v5 baseUrl.';
+const MISSING_KEY_ERROR =
+  'StormTTS: Missing API key. Please provide "apiKey" in client config or set STORM_API_KEY / STORM_TTS_API_KEY.';
 
 /**
  * Resolves a human-friendly voice name (e.g. "John") or raw catalogue ID
@@ -50,33 +56,40 @@ export function resolveSpeaker(
   return { name: normName, speaker_id: normId };
 }
 
+/** An HTTP error from a STORM server, with the status code kept for retry decisions. */
+export class StormHttpError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = 'StormHttpError';
+  }
+}
+
+function trimTrailingSlashes(url: string): string {
+  return url.replace(/\/+$/, '');
+}
+
 export class StormTTSClient {
+  /** The only host this client ever sends requests to. */
   public readonly baseUrl: string;
   private readonly apiKey?: string;
   private readonly timeoutMs: number;
   public readonly engine: 'v2-cloning' | 'v5-streaming' | 'auto';
   private detectedCapabilities?: StormCapabilities;
 
+  /**
+   * Each client talks to exactly one host with exactly one key. Environment
+   * variables only supply defaults for the chosen engine; they never redirect
+   * a request to a different host than the one this client was built for.
+   */
   constructor(config: ClientConfig = {}) {
-    const rawEngine = config.engine || 'auto';
-    this.engine = rawEngine;
+    this.engine = config.engine ?? 'auto';
+    const isV5 = this.engine === 'v5-streaming';
 
-    if (config.baseUrl) {
-      this.baseUrl = config.baseUrl.replace(/\/+$/, '');
-    } else if (rawEngine === 'v5-streaming') {
-      this.baseUrl = (process.env.STORM_TTS_BASE_URL || STORM_ENGINE_CONFIGS['v5-streaming'].defaultBaseUrl).replace(/\/+$/, '');
-    } else {
-      // Default to V2 (or STORM_BASE_URL)
-      this.baseUrl = (process.env.STORM_BASE_URL || STORM_ENGINE_CONFIGS['v2-cloning'].defaultBaseUrl).replace(/\/+$/, '');
-    }
+    const envBaseUrl = isV5 ? process.env.STORM_TTS_BASE_URL : process.env.STORM_BASE_URL;
+    const defaultBaseUrl = STORM_ENGINE_CONFIGS[isV5 ? 'v5-streaming' : 'v2-cloning'].defaultBaseUrl;
+    this.baseUrl = trimTrailingSlashes(config.baseUrl ?? envBaseUrl ?? defaultBaseUrl);
 
-    if (config.apiKey !== undefined) {
-      this.apiKey = config.apiKey;
-    } else if (rawEngine === 'v5-streaming') {
-      this.apiKey = process.env.STORM_TTS_API_KEY || process.env.STORM_API_KEY;
-    } else {
-      this.apiKey = process.env.STORM_API_KEY || process.env.STORM_TTS_API_KEY;
-    }
+    this.apiKey = config.apiKey ?? (isV5 ? process.env.STORM_TTS_API_KEY : process.env.STORM_API_KEY);
 
     this.timeoutMs = config.timeoutMs ?? 60000;
   }
@@ -102,7 +115,7 @@ export class StormTTSClient {
 
         const data = (await response.json()) as StormHealthResponse;
 
-        // Cache capabilities detection
+        // Detect the engine from the server's own health payload
         if (data.streaming === true || data.model_repo === 'wolethereader/storm-tts' || data.backend === 'vllm-async') {
           this.detectedCapabilities = {
             engine: 'v5-streaming',
@@ -146,12 +159,21 @@ export class StormTTSClient {
   }
 
   /**
+   * The engine this client talks to. An explicit `engine` wins; for 'auto'
+   * the server's health payload decides (cached after the first call).
+   */
+  private async resolveEngine(): Promise<'v2-cloning' | 'v5-streaming'> {
+    if (this.engine !== 'auto') return this.engine;
+    return (await this.getCapabilities()).engine;
+  }
+
+  /**
    * Get the list of all inbuilt native voices grouped by language.
    * Compatible across both V2 (/voices) and v5 (/speakers).
    */
   async listVoices(): Promise<StormVoicesResponse> {
     if (!this.apiKey) {
-      throw new Error('StormTTS: Missing API key. Please provide "apiKey" in client config or set STORM_API_KEY / STORM_TTS_API_KEY.');
+      throw new Error(MISSING_KEY_ERROR);
     }
 
     const headers: Record<string, string> = {
@@ -185,34 +207,8 @@ export class StormTTSClient {
         throw new Error(`Storm list voices failed (${response.status}): ${errorText}`);
       }
 
-      const data = (await response.json()) as StormVoicesResponse;
-
-      // Ensure John (slr70_ngm_09334) is clearly aliased and visible under Nigerian English and Pidgin
-      if (data.languages?.en) {
-        const enList = data.languages.en.speakers || data.languages.en.voices || [];
-        const hasJohnId = enList.some((s) => s.name === 'slr70_ngm_09334');
-        const hasJohnName = enList.some((s) => s.name === 'John');
-        if (hasJohnId && !hasJohnName) {
-          enList.unshift({
-            name: 'John',
-            gender: 'male',
-            hours: 0.33,
-          });
-        }
-      }
-      if (data.languages?.pcm) {
-        const pcmList = data.languages.pcm.speakers || data.languages.pcm.voices || [];
-        const hasJohn = pcmList.some((s) => s.name === 'John');
-        if (!hasJohn) {
-          pcmList.push({
-            name: 'John',
-            gender: 'male',
-            hours: 0.33,
-          });
-        }
-      }
-
-      return data;
+      // Returned exactly as the server reports it. Aliases such as "John" live in voice-overrides.ts.
+      return (await response.json()) as StormVoicesResponse;
     } finally {
       clearTimeout(timeout);
     }
@@ -238,7 +234,7 @@ export class StormTTSClient {
     }
 
     if (!this.apiKey) {
-      throw new Error('StormTTS: Missing API key. Please provide "apiKey" in client config or set STORM_API_KEY / STORM_TTS_API_KEY.');
+      throw new Error(MISSING_KEY_ERROR);
     }
 
     const isFast = options.fast !== false;
@@ -251,24 +247,33 @@ export class StormTTSClient {
       speaker_id: resolved.speaker_id,
     };
 
-    // Voice cloning is strictly supported on V2 (multipart form)
     if (effectiveOptions.referenceAudio) {
-      return this.generateMultipart(effectiveOptions, cleanText, isFast);
+      if ((await this.resolveEngine()) === 'v5-streaming') {
+        throw new Error(CLONING_ON_V5_ERROR);
+      }
+      return this.retryOnceOn503(() => this.generateMultipart(effectiveOptions, cleanText, isFast));
     }
 
-    // Auto-detect or check if v5 (JSON) vs V2 (multipart).
-    // John is exclusively hosted on v5; if John is requested, always route to v5.
-    const isV5Engine =
-      this.engine === 'v5-streaming' ||
-      this.baseUrl.includes('54.198.152.226') ||
-      resolved.speaker_id === 'slr70_ngm_09334';
-
-    if (isV5Engine) {
-      return this.generateJsonV5(effectiveOptions, cleanText, isFast);
+    if ((await this.resolveEngine()) === 'v5-streaming') {
+      return this.retryOnceOn503(() => this.generateJsonV5(effectiveOptions, cleanText, isFast));
     }
 
-    // Default to V2 multipart
-    return this.generateMultipart(effectiveOptions, cleanText, isFast);
+    return this.retryOnceOn503(() => this.generateMultipart(effectiveOptions, cleanText, isFast));
+  }
+
+  /**
+   * The STORM docs say a 503 means generation failed after the server's own retries, and that
+   * the caller should try again. One more attempt is made; a second failure is returned as is.
+   */
+  private async retryOnceOn503<T>(attempt: () => Promise<T>): Promise<T> {
+    try {
+      return await attempt();
+    } catch (err) {
+      if (err instanceof StormHttpError && err.status === 503) {
+        return attempt();
+      }
+      throw err;
+    }
   }
 
   private async generateJsonV5(
@@ -287,20 +292,11 @@ export class StormTTSClient {
     if (options.speaker_id) body.speaker_id = options.speaker_id;
     if (options.lang) body.lang = options.lang;
 
-    // Resolve target URL and key (supports auto-routing John even if client defaults to V2)
-    const isBaseUrlV5 = this.baseUrl.includes('54.198.152.226');
-    const targetUrl = isBaseUrlV5
-      ? `${this.baseUrl}/generate`
-      : `${process.env.STORM_TTS_BASE_URL || STORM_ENGINE_CONFIGS['v5-streaming'].defaultBaseUrl}/generate`;
-    const targetKey = isBaseUrlV5
-      ? this.apiKey!
-      : (process.env.STORM_TTS_API_KEY || this.apiKey!);
-
     try {
-      const response = await fetch(targetUrl, {
+      const response = await fetch(`${this.baseUrl}/generate`, {
         method: 'POST',
         headers: {
-          'X-API-Key': targetKey,
+          'X-API-Key': this.apiKey!,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(body),
@@ -309,7 +305,7 @@ export class StormTTSClient {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Storm generate failed (${response.status}): ${errorText}`);
+        throw new StormHttpError(`Storm generate failed (${response.status}): ${errorText}`, response.status);
       }
 
       const arrayBuffer = await response.arrayBuffer();
@@ -372,7 +368,7 @@ export class StormTTSClient {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Storm generate failed (${response.status}): ${errorText}`);
+        throw new StormHttpError(`Storm generate failed (${response.status}): ${errorText}`, response.status);
       }
 
       const arrayBuffer = await response.arrayBuffer();
@@ -402,13 +398,6 @@ export class StormTTSClient {
    * Clone a custom speaker's voice from reference audio (STORM-OS-TTS-V2).
    */
   async cloneVoice(options: CloneVoiceOptions): Promise<GenerateSpeechResult> {
-    const isV5 = this.engine === 'v5-streaming' || this.baseUrl.includes('54.198.152.226');
-    if (isV5) {
-      throw new Error(
-        'Voice cloning is supported on STORM-OS-TTS-V2 (http://18.208.227.247:8000). The current v5-streaming engine supports ultra-fast preset speakers and real-time streaming.'
-      );
-    }
-
     return this.generate({
       text: options.text,
       lang: options.lang,
@@ -422,16 +411,11 @@ export class StormTTSClient {
    * Yields 24kHz 16-bit mono PCM chunks as they are synthesized.
    */
   async *streamSpeech(options: StreamSpeechOptions): AsyncIterable<Uint8Array> {
-    const isBaseUrlV5 = this.baseUrl.includes('54.198.152.226');
-    const targetBaseUrl = isBaseUrlV5
-      ? this.baseUrl
-      : (process.env.STORM_TTS_BASE_URL || STORM_ENGINE_CONFIGS['v5-streaming'].defaultBaseUrl);
-    const targetKey = isBaseUrlV5
-      ? this.apiKey
-      : (process.env.STORM_TTS_API_KEY || this.apiKey);
-
-    if (!targetKey) {
-      throw new Error('StormTTS: Missing API key. Please provide "apiKey" or set STORM_TTS_API_KEY.');
+    if (!this.apiKey) {
+      throw new Error(MISSING_KEY_ERROR);
+    }
+    if (this.engine === 'v2-cloning') {
+      throw new Error(STREAMING_ON_V2_ERROR);
     }
 
     const cleanText = normalizeSpeechText(options.text, options.lang);
@@ -440,7 +424,6 @@ export class StormTTSClient {
     }
 
     const resolved = resolveSpeaker(options.name, options.speaker_id);
-    const streamUrl = `${targetBaseUrl}/generate/stream`;
     const body: Record<string, any> = {
       text: cleanText,
       fast: options.fast !== false,
@@ -449,19 +432,17 @@ export class StormTTSClient {
     if (resolved.speaker_id) body.speaker_id = resolved.speaker_id;
     if (options.lang) body.lang = options.lang;
 
-    const response = await fetch(streamUrl, {
+    const response = await fetch(`${this.baseUrl}/generate/stream`, {
       method: 'POST',
       headers: {
-        'X-API-Key': targetKey,
+        'X-API-Key': this.apiKey,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
     });
 
     if (response.status === 404) {
-      throw new Error(
-        `HTTP streaming (/generate/stream) is not supported on this endpoint (${this.baseUrl}). Streaming requires STORM TTS v5 (http://54.198.152.226:8000).`
-      );
+      throw new Error(`HTTP streaming (/generate/stream) is not available on ${this.baseUrl}. ${STREAMING_ON_V2_ERROR}`);
     }
 
     if (!response.ok) {
@@ -487,25 +468,20 @@ export class StormTTSClient {
 
   /**
    * Connect to a persistent WebSocket session for zero-latency multi-turn conversational agents.
-   * Requires STORM TTS v5 (ws://54.198.152.226:8000/generate/stream/ws).
+   * Requires STORM TTS v5. The API key is sent in the handshake header, not the URL.
    */
   createWebSocketSession(options: WebSocketSessionOptions = {}): StormWebSocketSession {
-    const isBaseUrlV5 = this.baseUrl.includes('54.198.152.226');
-    const targetBaseUrl = options.baseUrl || (isBaseUrlV5
-      ? this.baseUrl
-      : (process.env.STORM_TTS_BASE_URL || STORM_ENGINE_CONFIGS['v5-streaming'].defaultBaseUrl));
-    const targetKey = options.apiKey || (isBaseUrlV5
-      ? this.apiKey
-      : (process.env.STORM_TTS_API_KEY || this.apiKey));
+    if (this.engine === 'v2-cloning') {
+      throw new Error(STREAMING_ON_V2_ERROR);
+    }
 
-    if (!targetKey) {
+    const httpBase = trimTrailingSlashes(options.baseUrl ?? this.baseUrl);
+    const apiKey = options.apiKey ?? this.apiKey;
+    if (!apiKey) {
       throw new Error('StormTTS: API key required for WebSocket session.');
     }
 
-    const base = targetBaseUrl.replace(/^http/, 'ws');
-    const wsUrl = `${base}/generate/stream/ws?api_key=${encodeURIComponent(targetKey)}`;
-
-    return new StormWebSocketSession(wsUrl);
+    return new StormWebSocketSession(`${httpBase.replace(/^http/, 'ws')}/generate/stream/ws`, apiKey);
   }
 
   /**
@@ -538,8 +514,14 @@ export class StormWebSocketSession {
     reject: (err: Error) => void;
   };
 
-  constructor(private readonly wsUrl: string) {
-    this.ws = new WebSocket(this.wsUrl);
+  /** Endpoint URL. Credentials are never included here. */
+  public readonly url: string;
+
+  constructor(url: string, apiKey: string) {
+    this.url = url;
+    // The STORM v5 WebSocket endpoint authenticates via the api_key query parameter.
+    // A X-API-Key header is rejected with HTTP 403 (checked against the live server).
+    this.ws = new WebSocket(`${url}?api_key=${encodeURIComponent(apiKey)}`);
     this.init();
   }
 

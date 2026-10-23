@@ -240,7 +240,7 @@ async function runTestSuite() {
   // --- 3. MCP Server Protocol End-to-End Tests ---
   console.log('\n--- 3. Model Context Protocol (MCP) Server Tests ---');
 
-  const mcpServer = createStormMcpServer(clientV2);
+  const mcpServer = createStormMcpServer({ v2: clientV2, v5: clientV5 }, { sandboxRoot: process.cwd() });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
   await mcpServer.connect(serverTransport);
@@ -311,7 +311,7 @@ async function runTestSuite() {
     const res = await mcpClient.callTool({
       name: 'storm_tts_speak',
       arguments: {
-        text: 'This is John speaking through the Model Context Protocol server.',
+        text: 'Good evening. This is John speaking through the Model Context Protocol server, with clear news for everyone.',
         voice: 'John',
         fast: true,
         outputPath: testFileJohn,

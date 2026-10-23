@@ -6,7 +6,11 @@
         "/Users/mac/Desktop/PlotWeaver/storm-tts-mcp/dist/index.js"
       ],
       "env": {
-        "STORM_API_KEY": "your_storm_api_key_here"
+        "STORM_API_KEY": "your_storm_api_key_here",
+        "STORM_BASE_URL": "http://18.208.227.247:8000",
+        "STORM_TTS_API_KEY": "your_storm_tts_api_key_here",
+        "STORM_TTS_BASE_URL": "http://54.198.152.226:8000",
+        "STORM_MCP_ROOT": "/Users/you/storm-audio"
       }
     }
   }

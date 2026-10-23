@@ -23,8 +23,9 @@ export function normalizeSpeechText(rawText: string, lang?: StormLanguageCode): 
     .replace(/[*_`#~]/g, '')
     // Strip markdown link syntax: [Text](url) -> Text
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    // Strip bullet points at start of lines
-    .replace(/^[\s•\-\*]+\s*/gm, '');
+    // Strip bullet points at start of lines (bullet must be followed by whitespace,
+    // so negative numbers such as "-5 degrees" keep their sign)
+    .replace(/^[ \t]*[•\-*][ \t]+/gm, '');
 
   switch (lang) {
     case 'yo':
@@ -67,7 +68,8 @@ function normalizeYoruba(text: string): string {
     .replace(/°C\b/gi, ' degrees Celsius')
     .replace(/\b(?:kilometres|km)\b/gi, 'kílómítà')
     .replace(/\b(?:kilograms|kg)\b/gi, 'kílógíráàmù')
-    .replace(/\b(?:litres|L)\b/g, 'lítà')
+    .replace(/(\d)\s*(?:litres|L)\b/g, '$1 lítà')
+    .replace(/\blitres\b/gi, 'lítà')
     .replace(/\bmetres\b/gi, 'mítà')
 
     // Time & Acronyms
@@ -110,7 +112,8 @@ function normalizeIgbo(text: string): string {
     .replace(/°C\b/gi, ' degrees Celsius')
     .replace(/\b(?:kilometres|km)\b/gi, 'kilomita')
     .replace(/\b(?:kilograms|kg)\b/gi, 'kilogram')
-    .replace(/\b(?:litres|L)\b/g, 'lita')
+    .replace(/(\d)\s*(?:litres|L)\b/g, '$1 lita')
+    .replace(/\blitres\b/gi, 'lita')
     .replace(/\bmetres\b/gi, 'mita')
 
     // Time & Acronyms
