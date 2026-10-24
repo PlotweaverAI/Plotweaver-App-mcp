@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { StormTTSClient } from './client.js';
+import { ASR_AUDIO_TYPES, StormASRClient } from './asr.js';
 import { VoiceCatalog, type EndpointName, type StormClients } from './catalog.js';
 import { Concurrency } from './limits.js';
 import type { StormLanguageCode } from './types.js';
@@ -32,6 +33,8 @@ export interface StormMcpOptions {
   voiceCacheMs?: number;
   /** Share one catalog between many servers (for example, one per HTTP session). */
   catalog?: VoiceCatalog;
+  /** Speech-to-text client. When set, the storm_asr_transcribe tool is offered. */
+  asr?: StormASRClient;
 }
 
 const MAX_REFERENCE_BYTES = 25 * 1024 * 1024;
@@ -150,7 +153,7 @@ export function createStormMcpServer(
 
   const server = new McpServer({
     name: 'storm-tts-mcp',
-    version: '1.1.0',
+    version: '1.2.0',
   });
 
   /** Where a file-mode output will be written. Checked before generating, so a bad path costs nothing. */
@@ -211,6 +214,8 @@ export function createStormMcpServer(
         if (outputMode === 'inline' && outputPath) {
           return textResult('This server returns audio in the response. Remove "outputPath".', true);
         }
+        // Check a requested path before any network call, so a bad path fails fast and offline.
+        const requestedTarget = outputMode === 'file' && outputPath ? await fileTarget(outputPath, '') : undefined;
 
         let client: StormTTSClient;
         let endpoint: EndpointName;
@@ -228,7 +233,7 @@ export function createStormMcpServer(
         }
 
         const fileName = `storm_tts_${(speaker || language || 'audio').toLowerCase()}_${Date.now()}.wav`;
-        const target = outputMode === 'file' ? await fileTarget(outputPath, fileName) : undefined;
+        const target = outputMode === 'file' ? requestedTarget ?? (await fileTarget(undefined, fileName)) : undefined;
 
         guard({ tool: 'storm_tts_speak', characters: text.length });
 
@@ -321,6 +326,68 @@ export function createStormMcpServer(
     }
   );
 
+  // Tool: storm_asr_transcribe (only when an ASR client is configured)
+  const asr = options.asr;
+  if (asr) {
+    const asrLanguage = z
+      .enum(['yo', 'ha', 'ig', 'pcm', 'en'])
+      .describe("Language spoken in the audio: 'yo' (Yoruba), 'ha' (Hausa), 'ig' (Igbo), 'pcm' (Nigerian Pidgin), 'en' (Nigerian English). It is not detected automatically.");
+    const formats = Object.keys(ASR_AUDIO_TYPES).join(', ');
+    const asrInput: Record<string, z.ZodTypeAny> =
+      outputMode === 'inline'
+        ? {
+            audioBase64: z.string().describe(`Base64-encoded audio file (${formats}).`),
+            fileName: z.string().optional().describe('File name with extension, so the server knows the format. Defaults to audio.wav.'),
+            language: asrLanguage,
+          }
+        : {
+            audioPath: z.string().describe(`Path to an audio file (${formats}) inside the allowed folder.`),
+            language: asrLanguage,
+          };
+
+    server.tool(
+      'storm_asr_transcribe',
+      'Transcribe speech to text with STORM-OS ASR, tuned for Nigerian English, Pidgin, Yoruba, Hausa and Igbo. Handles voice notes and long recordings (audio over 20 seconds is chunked on the server). Pair with storm_tts_speak to reply by voice.',
+      asrInput as z.ZodRawShape,
+      async (args: any): Promise<any> => {
+        try {
+          let audio: string | Buffer;
+          let fileName: string | undefined;
+          if (outputMode === 'inline') {
+            audio = Buffer.from(args.audioBase64 as string, 'base64');
+            if (audio.length === 0) return textResult('audioBase64 is empty or not valid base64.', true);
+            if (audio.length > MAX_REFERENCE_BYTES) return textResult('Audio is too large (limit 25 MB).', true);
+            fileName = args.fileName;
+          } else {
+            audio = await resolveSandboxedPath(args.audioPath as string, {
+              root: sandboxRoot,
+              extensions: Object.keys(ASR_AUDIO_TYPES),
+              mustExist: true,
+              maxBytes: MAX_REFERENCE_BYTES,
+            });
+          }
+
+          guard({ tool: 'storm_asr_transcribe', characters: 0 });
+
+          const result = await asr.transcribe({ audio, language: args.language as StormLanguageCode, fileName });
+          if (!result.text) {
+            return textResult(`No speech was recognised in the audio (${result.audioDurationSeconds.toFixed(1)}s, language ${result.language}).`);
+          }
+          return textResult(`✅ Transcribed with STORM-OS ASR
+
+- **Language**: ${result.language}
+- **Audio Length**: ${result.audioDurationSeconds.toFixed(1)}s (${result.chunksProcessed} chunk${result.chunksProcessed === 1 ? '' : 's'})
+- **Processing Time**: ${result.elapsedSeconds.toFixed(2)}s
+
+**Transcript:**
+${result.text}`);
+        } catch (err: any) {
+          return textResult(`STORM-OS ASR Transcription Failed: ${err?.message || String(err)}`, true);
+        }
+      }
+    );
+  }
+
   // 3. Tool: storm_tts_list_voices
   server.tool(
     'storm_tts_list_voices',
@@ -354,7 +421,7 @@ export function createStormMcpServer(
   // 4. Tool: storm_tts_health
   server.tool(
     'storm_tts_health',
-    'Check whether the STORM TTS servers are up, which engines they run, and what capabilities they have.',
+    'Check whether the STORM TTS (and, if configured, ASR) servers are up, which engines they run, and what capabilities they have.',
     {},
     async () => {
       try {
@@ -370,6 +437,14 @@ export function createStormMcpServer(
             );
           } catch (err: any) {
             lines.push(`- ${endpoint === 'v5' ? 'STORM TTS v5' : 'STORM-OS-TTS-V2'}: Status: DOWN (${err?.message || String(err)})`);
+          }
+        }
+        if (asr) {
+          try {
+            const health = await asr.health();
+            lines.push(`- STORM-OS ASR: Status: ${String(health.asr ?? health.status).toUpperCase()} (${asr.baseUrl})`);
+          } catch (err: any) {
+            lines.push(`- STORM-OS ASR: Status: DOWN (${err?.message || String(err)})`);
           }
         }
         if (lines.length === 0) lines.push('- No endpoint is configured.');

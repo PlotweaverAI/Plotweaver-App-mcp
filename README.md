@@ -1,14 +1,14 @@
-# STORM TTS: Nigerian Speech for AI Assistants and Apps
+# STORM: Nigerian Speech for AI Assistants and Apps
 
 [![MCP Standard](https://img.shields.io/badge/MCP-Model%20Context%20Protocol-blue.svg)](https://modelcontextprotocol.io)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7+-3178C6.svg)](https://www.typescriptlang.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-green.svg)](LICENSE)
 
-Turn text into natural speech in **Yorùbá, Hausa, Igbo, Nigerian Pidgin, and Nigerian English**, using PlotWeaver STORM TTS.
+Turn text into natural speech, and speech into text, in **Yorùbá, Hausa, Igbo, Nigerian Pidgin, and Nigerian English**, using PlotWeaver STORM TTS and STORM-OS ASR.
 
 This package works in two ways:
 
-- **With an AI assistant** (Claude, Cursor, VS Code, and others). Ask the assistant to read something aloud, and it saves a WAV audio file. No coding needed.
+- **With an AI assistant** (Claude, Cursor, VS Code, and others). Ask the assistant to read something aloud, and it saves a WAV audio file. Give it a voice note, and it writes out what was said. No coding needed.
 - **In your own app**, using the TypeScript SDK. See [For developers](#for-developers).
 
 ---
@@ -17,9 +17,10 @@ This package works in two ways:
 
 ### What you need
 
-1. **A STORM key.** Get it from your STORM provider. There are two kinds:
+1. **A STORM key.** Get it from your STORM provider. There are three kinds:
    - `STORM_API_KEY` covers most voices and voice cloning.
    - `STORM_TTS_API_KEY` covers **John** (the flagship English and Pidgin voice) and live streaming. You only need it if you want those.
+   - `STORM_ASR_API_KEY` covers speech-to-text (transcribing audio). You only need it if you want that.
 2. **An AI assistant that supports MCP** (see [Which apps work](#which-apps-work)).
 
 ### Set it up
@@ -34,20 +35,25 @@ Add this to your assistant's MCP settings. It's a JSON file in Claude Desktop, a
       "args": ["-y", "@plotweaver/mcp-storm-tts"],
       "env": {
         "STORM_API_KEY": "your-storm-key",
-        "STORM_TTS_API_KEY": "your-storm-tts-key"
+        "STORM_TTS_API_KEY": "your-storm-tts-key",
+        "STORM_ASR_API_KEY": "your-storm-asr-key"
       }
     }
   }
 }
 ```
 
-Leave out `STORM_TTS_API_KEY` if you don't have it. Everything still works except John and the other v5-only voices.
+Leave out `STORM_TTS_API_KEY` if you don't have it. Everything still works except John and the other v5-only voices. Leave out `STORM_ASR_API_KEY` if you don't need transcription.
 
 Restart the app, then ask in plain words:
 
 > *"Read this in Yorùbá with the voice Adunni: Ẹ kú àárọ̀, ẹ kú iṣẹ́."*
 
 The assistant saves a WAV file and tells you where it is.
+
+With the ASR key set, it can listen too. Put an audio file in your audio folder, then ask:
+
+> *"Transcribe mama-voice-note.ogg. It's in Yorùbá. Then translate it and reply to her in Yorùbá with Adunni's voice."*
 
 ### Where the audio goes
 
@@ -59,7 +65,7 @@ To use a different folder, add this to the settings above:
 "STORM_MCP_ROOT": "/Users/you/Documents/StormAudio"
 ```
 
-For cloning a voice, put the reference clip (4–8 seconds, WAV) in that folder first.
+For cloning a voice, put the reference clip (4–8 seconds, WAV) in that folder first. For transcription, put the audio file there too (WAV, MP3, M4A, OGG, Opus, FLAC or WebM, which covers WhatsApp voice notes).
 
 ### Voices
 
@@ -79,6 +85,7 @@ If you don't know which voice to use, ask the assistant: *"List the STORM voices
 
 - **Speak text** in any of the five languages, with a chosen voice.
 - **Clone a voice** from a short clip. Put the clip in your audio folder first.
+- **Transcribe audio** in any of the five languages: voice notes, interviews, recordings. Tell it which language is spoken. Long recordings are fine.
 - **List voices**, by language.
 - **Check the service**, to see whether it's up.
 
@@ -124,6 +131,21 @@ await storm.generateAndSave(
   './john.wav'
 );
 ```
+
+### Transcribe speech (ASR)
+
+```typescript
+import { StormASRClient } from '@plotweaver/mcp-storm-tts';
+
+const asr = new StormASRClient(); // reads STORM_ASR_API_KEY and STORM_ASR_BASE_URL
+
+const { text, audioDurationSeconds } = await asr.transcribe({
+  audio: './voice-note.ogg', // a path, or raw bytes with fileName: 'note.ogg'
+  language: 'yo',            // en, yo, ha, ig or pcm; it is not detected automatically
+});
+```
+
+Audio longer than 20 seconds is split on the server and joined back, so you don't need to cut it up.
 
 ### Stream audio as it's generated (v5)
 
@@ -203,6 +225,8 @@ Each client sends its key only to its own address.
 | `STORM_BASE_URL` | V2 server address | `http://18.208.227.247:8000` |
 | `STORM_TTS_API_KEY` | Key for the v5 server | none |
 | `STORM_TTS_BASE_URL` | v5 server address | `http://54.198.152.226:8000` |
+| `STORM_ASR_API_KEY` | Key for the ASR (speech-to-text) server. Turns on `storm_asr_transcribe` | none |
+| `STORM_ASR_BASE_URL` | ASR server address | `http://34.228.222.150:8000` |
 | `STORM_ENGINE` | Prefer v5 for requests that don't name a voice (`v5-streaming`) | `v2-cloning` |
 | `STORM_MCP_ROOT` | Folder for reading and writing audio | `~/storm-audio` |
 
@@ -217,7 +241,7 @@ Each client sends its key only to its own address.
 
 ```bash
 npm test           # offline unit tests. No keys or network needed.
-npm run test:live  # runs against the real servers. Needs both keys in .env.
+npm run test:live  # runs against the real servers. Needs both TTS keys in .env; tests ASR too if its key is set.
 ```
 
 ---
@@ -233,7 +257,7 @@ node dist/index.js keys disable ada
 node dist/index.js http                       # serves MCP at http://127.0.0.1:8787/mcp
 ```
 
-Users add it to their app as a remote MCP server with `Authorization: Bearer <key>`. The gateway returns audio inside the response.
+Users add it to their app as a remote MCP server with `Authorization: Bearer <key>`. The gateway returns audio inside the response. It does not offer transcription yet: its daily limit counts characters of speech, and transcription needs a limit on audio length first.
 
 | Setting | Default | Purpose |
 | :--- | :--- | :--- |
@@ -254,7 +278,8 @@ The gateway serves plain HTTP. Put TLS in front of it. See [docs/ARCHITECTURE.md
 | "needs a STORM TTS v5 endpoint" | You asked for John or a v5-only voice without the v5 key | Add `STORM_TTS_API_KEY` |
 | "Voice cloning needs a STORM-OS-TTS-V2 endpoint" | Cloning needs the V2 key | Add `STORM_API_KEY` |
 | "Path must be inside the allowed directory" | The file is outside your audio folder | Move it into the folder, or change `STORM_MCP_ROOT` |
-| "Only .wav files are allowed" | Wrong file type | Convert the file to WAV |
+| "Only .wav files are allowed" | Wrong file type for cloning | Convert the file to WAV |
+| No `storm_asr_transcribe` tool | The ASR key isn't set | Add `STORM_ASR_API_KEY` |
 | "Missing API key" | The key for that server isn't set | Add the key |
 | "fetch failed" | The server can't be reached | Check your internet connection and try again later |
 | "403" on a live connection | The key was rejected | Check the key |

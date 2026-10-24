@@ -12,9 +12,11 @@ import { VoiceCatalog } from '../dist/catalog.js';
 import { Concurrency, DailyQuota, LimitError, RateLimiter } from '../dist/limits.js';
 import { KeyStore } from '../dist/keys.js';
 import { startGateway } from '../dist/gateway.js';
+import { StormASRClient } from '../dist/asr.js';
 
 const V2 = 'http://v2.test';
 const V5 = 'http://v5.test';
+const ASR = 'http://asr.test';
 
 /** Voice rosters as the servers report them. */
 const V2_ROSTER = {
@@ -694,5 +696,142 @@ describe('HTTP gateway', () => {
     } finally {
       await env.cleanup();
     }
+  });
+});
+
+describe('speech-to-text (ASR)', () => {
+  /** Answers /transcribe like the STORM-OS ASR server and records the form fields it received. */
+  function asrHandler(received, text = 'Ẹ kú àárọ̀') {
+    return async (url, init) => {
+      if (url === `${ASR}/health`) return jsonResponse({ status: 'ok', mt: 'ok', asr: 'ok' });
+      if (url === `${ASR}/transcribe`) {
+        const file = init.body.get('file');
+        received.push({ language: init.body.get('language'), fileName: file.name, size: file.size, type: file.type });
+        return jsonResponse({ request_id: 'r1', language: init.body.get('language'), text: ` ${text} `, audio_duration_s: 3.2, chunks_processed: 1, elapsed_s: 0.4 });
+      }
+      return rosterHandler()(url);
+    };
+  }
+
+  test('client sends the file and language to its own host with its own key', async () => {
+    const received = [];
+    await withFetch(asrHandler(received), async (calls) => {
+      const asr = new StormASRClient({ baseUrl: `${ASR}/`, apiKey: 'ka' });
+      const result = await asr.transcribe({ audio: new Uint8Array([1, 2, 3]), language: 'yo', fileName: 'note.ogg' });
+      assert.equal(result.text, 'Ẹ kú àárọ̀');
+      assert.equal(result.audioDurationSeconds, 3.2);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].url, `${ASR}/transcribe`);
+      assert.equal(calls[0].headers['X-API-Key'], 'ka');
+      assert.deepEqual(received, [{ language: 'yo', fileName: 'note.ogg', size: 3, type: '' }]);
+    });
+  });
+
+  test('client refuses without a key, and makes no request', async () => {
+    await withEnv({ STORM_ASR_API_KEY: undefined }, async () => {
+      await withFetch(asrHandler([]), async (calls) => {
+        const asr = new StormASRClient({ baseUrl: ASR });
+        await assert.rejects(asr.transcribe({ audio: new Uint8Array([1]), language: 'en' }), /STORM_ASR_API_KEY/);
+        assert.equal(calls.length, 0);
+      });
+    });
+  });
+
+  test('client surfaces HTTP errors with the status code', async () => {
+    await withFetch(() => new Response('bad key', { status: 401 }), async () => {
+      const asr = new StormASRClient({ baseUrl: ASR, apiKey: 'wrong' });
+      await assert.rejects(asr.transcribe({ audio: new Uint8Array([1]), language: 'en' }), (err) => err.status === 401 && /401/.test(err.message));
+    });
+  });
+
+  test('the transcribe tool is only offered when an ASR client is configured', async () => {
+    const v2 = new StormTTSClient({ engine: 'v2-cloning', baseUrl: V2, apiKey: 'k2' });
+    for (const [asr, expected] of [[undefined, false], [new StormASRClient({ baseUrl: ASR, apiKey: 'ka' }), true]]) {
+      const { client, close } = await connectMcp(createStormMcpServer({ v2 }, { asr }));
+      try {
+        const { tools } = await client.listTools();
+        assert.equal(tools.some((t) => t.name === 'storm_asr_transcribe'), expected);
+      } finally {
+        await close();
+      }
+    }
+  });
+
+  test('storm_asr_transcribe reads an audio file inside the sandbox', async () => {
+    const root = await fs.realpath(await tempDir('storm-asr-ok-'));
+    const received = [];
+    try {
+      await fs.writeFile(path.join(root, 'voice-note.ogg'), new Uint8Array(50));
+      await withFetch(asrHandler(received, 'Wetin dey happen'), async () => {
+        const asr = new StormASRClient({ baseUrl: ASR, apiKey: 'ka' });
+        const { client, close } = await connectMcp(createStormMcpServer({}, { sandboxRoot: root, asr }));
+        try {
+          const res = await client.callTool({ name: 'storm_asr_transcribe', arguments: { audioPath: 'voice-note.ogg', language: 'pcm' } });
+          assert.notEqual(res.isError, true, res.content[0]?.text);
+          assert.match(res.content[0].text, /Wetin dey happen/);
+          assert.deepEqual(received, [{ language: 'pcm', fileName: 'voice-note.ogg', size: 50, type: 'audio/ogg' }]);
+        } finally {
+          await close();
+        }
+      });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('storm_asr_transcribe refuses files outside the sandbox or of other types, without a request', async () => {
+    const root = await fs.realpath(await tempDir('storm-asr-root-'));
+    try {
+      await fs.writeFile(path.join(root, 'notes.txt'), 'not audio');
+      await withFetch(asrHandler([]), async (calls) => {
+        const asr = new StormASRClient({ baseUrl: ASR, apiKey: 'ka' });
+        const { client, close } = await connectMcp(createStormMcpServer({}, { sandboxRoot: root, asr }));
+        try {
+          for (const audioPath of ['/etc/hosts', 'notes.txt', 'missing.wav']) {
+            const res = await client.callTool({ name: 'storm_asr_transcribe', arguments: { audioPath, language: 'en' } });
+            assert.equal(res.isError, true, `${audioPath} was accepted`);
+          }
+          assert.equal(calls.filter((c) => c.url.includes('/transcribe')).length, 0);
+        } finally {
+          await close();
+        }
+      });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('inline mode takes base64 audio and reads no files', async () => {
+    const received = [];
+    await withFetch(asrHandler(received), async () => {
+      const asr = new StormASRClient({ baseUrl: ASR, apiKey: 'ka' });
+      const { client, close } = await connectMcp(createStormMcpServer({}, { outputMode: 'inline', asr }));
+      try {
+        const { tools } = await client.listTools();
+        const schema = tools.find((t) => t.name === 'storm_asr_transcribe').inputSchema;
+        assert.ok(schema.properties.audioBase64 && !schema.properties.audioPath);
+        const res = await client.callTool({
+          name: 'storm_asr_transcribe',
+          arguments: { audioBase64: Buffer.from([1, 2, 3, 4]).toString('base64'), fileName: 'clip.wav', language: 'ha' },
+        });
+        assert.notEqual(res.isError, true, res.content[0]?.text);
+        assert.deepEqual(received, [{ language: 'ha', fileName: 'clip.wav', size: 4, type: '' }]);
+      } finally {
+        await close();
+      }
+    });
+  });
+
+  test('storm_tts_health includes the ASR server', async () => {
+    await withFetch(asrHandler([]), async () => {
+      const asr = new StormASRClient({ baseUrl: ASR, apiKey: 'ka' });
+      const { client, close } = await connectMcp(createStormMcpServer({}, { asr }));
+      try {
+        const res = await client.callTool({ name: 'storm_tts_health', arguments: {} });
+        assert.match(res.content[0].text, /STORM-OS ASR: Status: OK/);
+      } finally {
+        await close();
+      }
+    });
   });
 });

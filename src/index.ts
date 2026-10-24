@@ -7,6 +7,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import * as dotenv from 'dotenv';
 import { createStormMcpServer, type StormClients } from './server.js';
 import { StormTTSClient } from './client.js';
+import { StormASRClient } from './asr.js';
 import { startGateway } from './gateway.js';
 import { KeyStore } from './keys.js';
 
@@ -21,6 +22,7 @@ export { startGateway, type GatewayConfig } from './gateway.js';
 export { KeyStore, type PublicKey } from './keys.js';
 export { Concurrency, RateLimiter, DailyQuota, LimitError } from './limits.js';
 export { VOICE_OVERRIDES } from './voice-overrides.js';
+export { StormASRClient, ASR_AUDIO_TYPES, type ASRClientConfig, type TranscribeOptions, type TranscribeResult } from './asr.js';
 export * from './types.js';
 
 /**
@@ -50,6 +52,12 @@ export function clientsFromEnv(env: NodeJS.ProcessEnv = process.env): StormClien
   return clients;
 }
 
+/** STORM_ASR_API_KEY + STORM_ASR_BASE_URL -> speech-to-text. Undefined when no key is set. */
+export function asrFromEnv(env: NodeJS.ProcessEnv = process.env): StormASRClient | undefined {
+  if (!env.STORM_ASR_API_KEY) return undefined;
+  return new StormASRClient({ apiKey: env.STORM_ASR_API_KEY, baseUrl: env.STORM_ASR_BASE_URL });
+}
+
 function defaultEngineFromEnv(): 'v2-cloning' | 'v5-streaming' {
   return process.env.STORM_ENGINE === 'v5-streaming' ? 'v5-streaming' : 'v2-cloning';
 }
@@ -74,10 +82,11 @@ async function runStdio(): Promise<void> {
     console.error('[STORM MCP] Warning: no API key set. Set STORM_API_KEY (V2) and/or STORM_TTS_API_KEY (v5) in the environment or .env.');
   }
 
-  const server = createStormMcpServer(clients, { defaultEngine: defaultEngineFromEnv() });
+  const asr = asrFromEnv();
+  const server = createStormMcpServer(clients, { defaultEngine: defaultEngineFromEnv(), asr });
   await server.connect(new StdioServerTransport());
 
-  const endpoints = [clients.v2 && `v2: ${clients.v2.baseUrl}`, clients.v5 && `v5: ${clients.v5.baseUrl}`]
+  const endpoints = [clients.v2 && `v2: ${clients.v2.baseUrl}`, clients.v5 && `v5: ${clients.v5.baseUrl}`, asr && `asr: ${asr.baseUrl}`]
     .filter(Boolean)
     .join(', ');
   console.error(`STORM TTS MCP Server running on stdio (${endpoints || 'no endpoints configured'})`);

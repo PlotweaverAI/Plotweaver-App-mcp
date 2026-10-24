@@ -1,6 +1,7 @@
 // Live end-to-end test: launches the built MCP server as a subprocess over stdio,
 // exactly as Claude Desktop / Cursor do, and calls its tools against the real STORM endpoints.
 // Requires STORM_API_KEY and STORM_TTS_API_KEY (read from .env or the environment).
+// With STORM_ASR_API_KEY set, the speech-to-text tool is tested too.
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -48,8 +49,23 @@ async function isRiffWav(file) {
   return buf.length > 44 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WAVE';
 }
 
+// GPU synthesis can take longer than the MCP SDK's 60 s default, especially for cloning.
+const CALL_TIMEOUT_MS = 180_000;
+
+function editDistance(a, b) {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = row;
+  }
+  return prev[b.length];
+}
+
 async function callOk(name, args) {
-  const res = await client.callTool({ name, arguments: args });
+  const res = await client.callTool({ name, arguments: args }, undefined, { timeout: CALL_TIMEOUT_MS });
   if (res.isError) throw new Error(`${name} returned error: ${text(res)}`);
   return res;
 }
@@ -62,10 +78,12 @@ console.log('====================================================');
 try {
   await client.connect(transport);
 
-  await step('Server starts and lists the four tools', async () => {
+  const hasAsr = Boolean(process.env.STORM_ASR_API_KEY);
+
+  await step(`Server starts and lists the ${hasAsr ? 'five' : 'four'} tools`, async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
-    const expected = ['storm_tts_clone_voice', 'storm_tts_health', 'storm_tts_list_voices', 'storm_tts_speak'];
+    const expected = [...(hasAsr ? ['storm_asr_transcribe'] : []), 'storm_tts_clone_voice', 'storm_tts_health', 'storm_tts_list_voices', 'storm_tts_speak'];
     if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`tools: ${names.join(', ')}`);
   });
 
@@ -124,8 +142,7 @@ try {
   await step('storm_tts_clone_voice clones from a sandboxed reference clip', async () => {
     // Use a longer clip as the reference so it's within the 4–8 s range the cloning model expects.
     await callOk('storm_tts_speak', {
-      text:
-        'Good morning everybody, welcome to the programme. Today we are going to talk about the weather, the market, and the football results from last weekend. Stay with us.',
+      text: 'Good morning everybody, welcome to the programme. Today we talk about the market.',
       voice: 'Amina',
       outputPath: 'reference.wav',
     });
@@ -137,6 +154,26 @@ try {
     });
     if (!(await isRiffWav(path.join(sandbox, 'cloned.wav')))) throw new Error('cloned.wav is not a WAV');
   });
+
+  if (hasAsr) {
+    await step('Round trip: Yorùbá speech from Adunni transcribes back to the same words', async () => {
+      const spoken = 'Ẹ kú àárọ̀, ẹ kú iṣẹ́. Ọjà náà ti ṣí lónìí.';
+      await callOk('storm_tts_speak', { text: spoken, voice: 'Adunni', outputPath: 'roundtrip.wav' });
+      const res = await callOk('storm_asr_transcribe', { audioPath: 'roundtrip.wav', language: 'yo' });
+      const heard = (text(res).split('**Transcript:**')[1] ?? '').trim();
+      // Character error rate on letters only: tone marks, spacing and punctuation vary between
+      // equally valid Yorùbá spellings ("Ẹ kú" / "Ekú"), so they are not counted.
+      const letters = (s) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z]/g, '');
+      const cer = editDistance(letters(spoken), letters(heard)) / letters(spoken).length;
+      console.log(`\n    heard: "${heard}" (CER ${(cer * 100).toFixed(1)}%)`);
+      if (cer > 0.25) throw new Error(`transcript too far from input: "${heard}"`);
+    });
+
+    await step('storm_asr_transcribe refuses audio outside the sandbox', async () => {
+      const res = await client.callTool({ name: 'storm_asr_transcribe', arguments: { audioPath: '/etc/hosts', language: 'en' } });
+      if (!res.isError) throw new Error('expected an error');
+    });
+  }
 
   await step('Clone refuses a reference file outside the sandbox', async () => {
     const res = await client.callTool({
