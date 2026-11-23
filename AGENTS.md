@@ -13,7 +13,7 @@ PlotWeaver is speech AI for Nigerian and African languages, connected as the `pl
 ## Choosing voices
 
 - Call `find_voices` with the language and pick a native speaker of that language. They are listed first.
-- Defaults: `aderonke` (Yoruba), `maryam` (Hausa), `chinwe` (Igbo), `ufuoma` (Pidgin), `joseph` (Nigerian English).
+- Defaults: `aderonke` (Yoruba), `maryam` (Hausa), `chinwe` (Igbo), `ufuoma` (Pidgin), `bisola` (Nigerian English).
 - For a brand voice that stays the same across the five Nigerian languages, use one built-in voice everywhere, or a voice the user cloned in a Nigerian language.
 - Outside Nigeria, leave `voice_id` out unless the user names one: the language's default is chosen for you.
 
