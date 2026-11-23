@@ -1,0 +1,14 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "app.plotweaver.mcp/plotweaver",
+  "title": "PlotWeaver",
+  "description": "Speech, voice cloning, transcription and translation for Nigerian and African languages.",
+  "version": "1.0.0",
+  "websiteUrl": "https://app.plotweaver.app/mcp",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.plotweaver.app/mcp"
+    }
+  ]
+}

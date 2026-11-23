@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "plotweaver": {
+      "url": "https://mcp.plotweaver.app/mcp",
+      "headers": {
+        "X-API-Key": "${env:PLOTWEAVER_API_KEY}"
+      }
+    }
+  }
+}

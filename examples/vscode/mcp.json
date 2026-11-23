@@ -1,0 +1,19 @@
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "plotweaver-key",
+      "description": "PlotWeaver API key",
+      "password": true
+    }
+  ],
+  "servers": {
+    "plotweaver": {
+      "type": "http",
+      "url": "https://mcp.plotweaver.app/mcp",
+      "headers": {
+        "X-API-Key": "${input:plotweaver-key}"
+      }
+    }
+  }
+}
