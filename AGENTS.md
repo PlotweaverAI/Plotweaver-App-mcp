@@ -20,7 +20,7 @@ PlotWeaver is speech AI for Nigerian and African languages, connected as the `pl
 ## Writing text to speak
 
 - Write Yoruba with full tone marks and underdots (`Ẹ kú àárọ̀`, never `E ku aaro`). The marks change the meaning.
-- Put a space between the digits of phone and account numbers (`0 8 0 3 1 2 3 ...`) so each digit is read on its own.
+- Phone and account numbers are read digit by digit automatically; write them as normal (`0803 123 4567`).
 - In languages outside the five Nigerian ones, write numbers, amounts and dates as words.
 - Punctuate for rhythm: commas and full stops become pauses.
 
