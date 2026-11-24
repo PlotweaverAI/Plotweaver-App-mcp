@@ -110,6 +110,8 @@ Translate between English, Yoruba, Hausa, Igbo and Nigerian Pidgin with PlotWeav
 
 Use it for scripts, subtitles, captions and messages; then speak to voice the result. Any length: long text is translated sentence by sentence in order. Billed per character of source text.
 
+STORM MT can make mistakes. Check important translations.
+
 | Input | Type | Required | Notes |
 |---|---|---|---|
 | `source_language` | string: `en`, `yo`, `ha`, `ig`, `pcm` | Yes | en, yo, ha, ig or pcm |

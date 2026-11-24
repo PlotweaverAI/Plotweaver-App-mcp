@@ -47,5 +47,6 @@ You don't need to name tools. Say what you want; your assistant picks the tools 
 
 - **Name the language and the use.** "A warm Yoruba voice for a bank's customer line" picks better than "a Yoruba voice".
 - **Give the exact words when they matter.** Put the text in quotes and the assistant voices it as written.
-- **Write Yoruba with tone marks** when you give the text yourself.
+- **Write Yoruba with tone marks, Igbo with its dotted letters (ị, ọ, ụ, ṅ) and Hausa with its hooked letters (ɓ, ɗ, ƙ)** when you give the text yourself.
+- **Check important translations**: STORM MT can make mistakes.
 - **Ask for one clip per scene** for video work: each file comes back with its exact duration, ready for the timeline.
