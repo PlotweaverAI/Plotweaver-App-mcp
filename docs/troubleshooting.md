@@ -33,7 +33,7 @@ Your account needs an active plan or credit, or a payment failed. Open **Billing
   <details>
 <summary><strong>429: too many requests</strong></summary>
 
-Your plan's requests per minute, or this month's allowance, is used up, or a voice engine is momentarily full. The assistant will be told when to retry. See [Limits](https://plotweaver.mintlify.app/limits).
+Your plan's requests per minute, or this month's allowance, is used up, or a voice engine is momentarily full. The assistant will be told when to retry. See [Limits](https://plotweaver.mintlify.app/reference/rate-limits).
 
 </details>
 

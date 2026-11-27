@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://plotweaver.mintlify.app/mcp/overview"><b>Documentation</b></a> ·
+  <a href="https://app.plotweaver.app/mcp"><b>Documentation</b></a> ·
   <a href="docs/tools.md"><b>Tools</b></a> ·
   <a href="docs/prompts.md"><b>Example prompts</b></a> ·
   <a href="https://app.plotweaver.app"><b>Get an account</b></a>

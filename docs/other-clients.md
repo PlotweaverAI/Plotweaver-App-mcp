@@ -95,4 +95,4 @@ print(response.output_text)
 ```
 
 > [!TIP]
-> Building a product rather than an agent? The [developer API](https://plotweaver.mintlify.app/quickstart) gives you the same capabilities with full control and no model in between.
+> Building a product rather than an agent? The [developer API](https://plotweaver.mintlify.app/getting-started/quickstart) gives you the same capabilities with full control and no model in between.
